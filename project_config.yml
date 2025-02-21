@@ -7,35 +7,31 @@ parameters:
   max_depth: 6
 
 num_features:
-  - LotFrontage
-  - LotArea
-  - OverallQual
-  - OverallCond
-  - YearBuilt
-  - YearRemodAdd
-  - MasVnrArea
-  - TotalBsmtSF
-  - GrLivArea
-  - GarageCars
+  - age
+  - education_level
+  - bmi
+  - cognitive_test_score
 
 cat_features:
-  - MSZoning
-  - Street
-  - Alley
-  - LotShape
-  - LandContour
-  - Neighborhood
-  - Condition1
-  - BldgType
-  - HouseStyle
-  - RoofStyle
-  - Exterior1st
-  - Exterior2nd
-  - MasVnrType
-  - Foundation
-  - Heating
-  - CentralAir
-  - SaleType
-  - SaleCondition
-
-target: SalePrice
+  - country
+  - gender
+  - physical_activity_level
+  - smoking_status
+  - alcohol_consumption
+  - diabetes
+  - hypertension
+  - cholesterol_level
+  - family_history_of_alzheimers
+  - depression_level
+  - sleep_quality
+  - dietary_habits
+  - air_pollution_exposure
+  - employment_status
+  - marital_status
+  - genetic_risk_factor_(apoe-ε4_allele)
+  - social_engagement_level
+  - income_level
+  - stress_levels
+  - urban_vs_rural_living
+  
+target: alzheimers_diagnosis
