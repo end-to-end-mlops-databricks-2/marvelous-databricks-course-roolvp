@@ -28,7 +28,7 @@ cat_features:
   - air_pollution_exposure
   - employment_status
   - marital_status
-  - genetic_risk_factor_(apoe-ε4_allele)
+  - genetic_risk_factor__apoe__4_allele_
   - social_engagement_level
   - income_level
   - stress_levels
