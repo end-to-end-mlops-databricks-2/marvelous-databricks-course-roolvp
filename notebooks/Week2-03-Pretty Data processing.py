@@ -9,12 +9,13 @@
 
 # COMMAND ----------
 
-import yaml
 import logging
 
-from alzheimers_prediction.data_processor import DataProcessor
-from alzheimers_prediction.config import ProjectConfig
+import yaml
 from pyspark.sql import SparkSession
+
+from alzheimers_prediction.config import ProjectConfig
+from alzheimers_prediction.data_processor import DataProcessor
 
 # COMMAND ----------
 
@@ -35,7 +36,9 @@ logging.basicConfig(level=logging.INFO)
 spark = SparkSession.builder.getOrCreate()
 
 df = spark.read.csv(
-    f"/Volumes/{config.catalog_name}/{config.schema_name}/data/alzheimers_prediction_dataset.csv", header=True, inferSchema=True
+    f"/Volumes/{config.catalog_name}/{config.schema_name}/data/alzheimers_prediction_dataset.csv",
+    header=True,
+    inferSchema=True,
 ).toPandas()
 
 # COMMAND ----------
@@ -45,13 +48,11 @@ data_processor = DataProcessor(df, config, spark)
 # Preprocess the data
 data_processor.preprocess()
 
-#Split the data
+# Split the data
 train_set, test_set = data_processor.split_data()
 logger.info("Train set shape %s", train_set.shape)
 logger.info("Test set shape %s", test_set.shape)
 
-# COMMAND ----------
-train_set.dtypes
 
 # COMMAND ----------
 # Save to catalog

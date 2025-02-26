@@ -9,11 +9,12 @@
 
 # COMMAND ----------
 
+import re
+
+import pandas as pd
 import yaml
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import current_timestamp, to_utc_timestamp
-import pandas as pd
-import re
 from sklearn.model_selection import train_test_split
 
 # COMMAND ----------
@@ -48,41 +49,32 @@ df = pd.read_csv(filepath)
 
 # COMMAND ----------
 
-df.dtypes
-
-# COMMAND ----------
-
 # Pre-process the data
 
 # Make columns names SQL compliant
-df.columns = [column.replace(" ","_").lower().replace("’","") for column in df.columns]
-df.columns = [re.sub(r'[^a-zA-Z0-9]', '_', column) for column in df.columns]
+df.columns = [column.replace(" ", "_").lower().replace("’", "") for column in df.columns]
+df.columns = [re.sub(r"[^a-zA-Z0-9]", "_", column) for column in df.columns]
 
 # Cast features to the correct type (Types are different locally than in databrics, locally they are 32, in Databricks they are 64)
 
-num_features = df.select_dtypes(include=['int32','int64','float64','float32']).columns.tolist() 
-cat_features = df.select_dtypes(include=['object']).columns.tolist()
+num_features = df.select_dtypes(include=["int32", "int64", "float64", "float32"]).columns.tolist()
+cat_features = df.select_dtypes(include=["object"]).columns.tolist()
 cat_features.remove(target)
 for cat_col in cat_features:
     df[cat_col] = df[cat_col].astype("category")
 
 # Make target 1 or 0
-df[target] = df[target].apply(lambda x: 1 if x == 'Yes' else 0)
+df[target] = df[target].apply(lambda x: 1 if x == "Yes" else 0)
 
 # Add df index as id column
-df['id'] = df.index.astype(str)
+df["id"] = df.index.astype(str)
 
 # COMMAND ----------
 
 
-
 # COMMAND ----------
 
-df.columns
-
-# COMMAND ----------
-
-relevant_columns = cat_features + num_features + [target] + ['id']
+relevant_columns = cat_features + num_features + [target] + ["id"]
 df = df[relevant_columns]
 train_set, test_set = train_test_split(df, test_size=0.2)
 
@@ -92,7 +84,6 @@ train_set, test_set = train_test_split(df, test_size=0.2)
 train_set.sample(10)
 
 # COMMAND ----------
-
 
 
 # COMMAND ----------
@@ -109,11 +100,10 @@ train_set = spark.createDataFrame(train_set)
 train_set_with_timestamp = train_set.withColumn("update_timestamp_utc", to_utc_timestamp(current_timestamp(), "UTC"))
 
 test_set = spark.createDataFrame(test_set)
-test_set_with_timestamp =  test_set.withColumn("update_timestamp_utc", to_utc_timestamp(current_timestamp(), "UTC"))
+test_set_with_timestamp = test_set.withColumn("update_timestamp_utc", to_utc_timestamp(current_timestamp(), "UTC"))
 
 
 # COMMAND ----------
-
 
 
 # COMMAND ----------

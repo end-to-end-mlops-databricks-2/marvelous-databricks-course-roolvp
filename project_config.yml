@@ -33,5 +33,5 @@ cat_features:
   - income_level
   - stress_levels
   - urban_vs_rural_living
-  
+
 target: alzheimers_diagnosis
