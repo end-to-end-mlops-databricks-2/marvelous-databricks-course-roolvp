@@ -2,10 +2,23 @@ import mlflow
 import pandas as pd
 
 from mlflow import MlflowClient
+from mlflow.models.signature import infer_signature
+
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import recall_score
+from sklearn.metrics import precision_score
+from sklearn.metrics import f1_score
+
 from pyspark.sql import SparkSession
 
 from alzheimers_prediction.config import ProjectConfig, Tags
 from loguru import logger
+
+
 
 class BasicModel:
     def __init__(self, config: ProjectConfig, tags: Tags, spark: SparkSession):
@@ -35,6 +48,7 @@ class BasicModel:
         
         self.test_set_spark = self.spark.table(f"{self.catalog_name}.{self.schema_name}.test_set")
         self.test_set_pandas = self.test_set_spark.toPandas()
+        self.data_version = "0" 
 
         self.X_train = self.train_set_pandas[self.num_features + self.cat_features]
         self.y_train = self.train_set_pandas[self.target]
@@ -42,3 +56,65 @@ class BasicModel:
         self.X_test = self.test_set_pandas[self.num_features + self.cat_features]
         self.y_test = self.test_set_pandas[self.target]
         logger.info("🏗️ Data loaded successfully")
+
+    def prepare_features(self) -> None:
+        """
+        Encode categorical features and ignores unseen categories
+
+        preprocessor = ColumnTransformer(
+        transformers=[("cat", OneHotEncoder(handle_unknown="ignore"), cat_features)], remainder="passthrough"
+)
+
+        transformed_df_train = pd.DataFrame(preprocessor.fit_transform(X_train), columns=preprocessor.get_feature_names_out())
+        transformed_df_test = pd.DataFrame(preprocessor.transform(X_test), columns=preprocessor.get_feature_names_out())
+        """
+        logger.info("⌛ Defining feature pre-processing pipeline")
+        self.preprocessor = ColumnTransformer(
+            transformers=[("cat", OneHotEncoder(handle_unknown="ignore"), self.cat_features)], remainder="passthrough"
+        )
+
+        self.pipeline = Pipeline(
+            steps=[("preprocessor", self.preprocessor), ("classifier", LogisticRegression(**self.parameters))]
+        )
+        logger.info("✅ Feature pre-processing pipeline defined successfully")
+
+    def train(self) -> None:
+        """
+        Train the model
+        """
+        logger.info("🏋️ Training the model")
+        self.pipeline.fit(self.X_train, self.y_train)
+        logger.info("✅ Model trained successfully")
+
+    def log_model(self):
+        """
+        Evaluate the model and log it to MLflow
+        """
+        mlflow.set_experiment(self.experiment_name)
+        with mlflow.start_run() as run:
+            self.run_id = run.info.run_id
+
+            y_pred = self.pipeline.predict(self.X_test)
+            precision = precision_score(self.y_test, y_pred)
+            recall = recall_score(self.y_test, y_pred)
+            f1 = f1_score(self.y_test, y_pred)
+
+            logger.info("🎯 Model evaluation metrics:")
+            logger.info(f"Precision: {precision}")
+            logger.info(f"Recall: {recall}")
+            logger.info(f"F1: {f1}")
+
+            mlflow.log_param("model_type", "LogisticRegression with OneHotEncoding")
+            mlflow.log_params(self.parameters)
+            mlflow.log_metrics({"precision": precision, "recall": recall, "f1": f1})
+
+            # Log the model
+            signature = infer_signature(model_input=self.X_test, model_output=y_pred)
+            dataset = mlflow.data.from_spark(self.train_set_spark,
+                                             table_name=f"{self.catalog_name}.{self.schema_name}.train_set",
+                                             version=self.data_version)
+        
+            mlflow.log_input(dataset=dataset, context="training")
+            mlflow.sklearn.log_model(self.pipeline, artifact_path="logisticreg-pipeline-model", signature=signature)
+
+    

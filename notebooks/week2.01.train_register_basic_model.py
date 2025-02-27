@@ -11,6 +11,7 @@ from alzheimers_prediction.models.basic_model import BasicModel
 mlflow.set_tracking_uri("databricks")
 mlflow.set_registry_uri("databricks-uc")
 
+mlflow.login()
 config = ProjectConfig.from_yaml(config_path="../project_config.yml")
 spark = SparkSession.builder.getOrCreate()
 
@@ -18,7 +19,15 @@ tags = Tags(**{"git_sha":"ccdd47f458bf3c29586e7614260d14e764efd35d", "branch":"w
 
 # COMMAND ----------
 
-BasicModel(config=config, tags=tags, spark=spark).load_data()
-
+basic_model = BasicModel(config=config, tags=tags, spark=spark)
+basic_model.load_data()
+basic_model.prepare_features()
 
 # COMMAND ----------
+
+basic_model.train()
+# COMMAND ----------
+
+basic_model.log_model()
+# COMMAND ----------
+

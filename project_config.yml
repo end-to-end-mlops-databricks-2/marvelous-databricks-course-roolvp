@@ -1,11 +1,9 @@
 catalog_name: mlops_dev
 schema_name: raulvenp
-experiment_name_basic: /Shared/alzheimers-prediction-basic
+experiment_name_basic: /Shared/alzheimers--basic
 
 parameters:
-  learning_rate: 0.01
-  n_estimators: 1000
-  max_depth: 6
+  max_iter: 10000
 
 num_features:
   - age
