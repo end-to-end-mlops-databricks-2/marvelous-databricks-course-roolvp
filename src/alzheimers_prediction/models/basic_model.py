@@ -91,7 +91,7 @@ class BasicModel:
         Evaluate the model and log it to MLflow
         """
         mlflow.set_experiment(self.experiment_name)
-        with mlflow.start_run() as run:
+        with mlflow.start_run(tags=self.tags) as run:
             self.run_id = run.info.run_id
 
             y_pred = self.pipeline.predict(self.X_test)
@@ -117,4 +117,65 @@ class BasicModel:
             mlflow.log_input(dataset=dataset, context="training")
             mlflow.sklearn.log_model(self.pipeline, artifact_path="logisticreg-pipeline-model", signature=signature)
 
+    
+    def register_model(self):
+        """
+        Register the model in Databricks Unity Catalog
+        """
+        logger.info("📦 Registering the model in the Databricks Unity Catalog")
+        registered_model = mlflow.register_model(
+            model_uri=f"runs:/{self.run_id}/logisticreg-pipeline-model", 
+            name=self.model_name,
+            tags=self.tags
+            )
+        
+        latest_version = registered_model.version
+
+        client = MlflowClient()
+        client.set_registered_model_alias(
+            name=self.model_name,
+            alias="latest-model",
+            version=latest_version
+        )
+        
+
+    def retrieve_current_run_dataset(self):
+        """
+        Retrieve the dataset used in the current run
+        """
+        run = mlflow.get_run(self.run_id)
+        dataset_info = run.inputs.dataset_inputs[0].dataset
+        dataset_source = mlflow.data.get_source(dataset_info)
+        # What  is a dataset? Is it a reference or the actual data?
+        logger.info("📊 Dataset source loaded")
+        return dataset_source.load()
+    
+    def retrieve_current_run_metadata(self):
+
+        run = mlflow.get_run(self.run_id)
+        metrics = run.data.to_dictionary()["metrics"]
+        params = run.data.to_dictionary()["params"]
+        logger.info("📊 Dataset metadata loaded")
+        return metrics, params
+    
+    def load_latest_model_and_predict(self, input_data: pd.DataFrame):
+        """
+        Load the latest model from MLflow (alias=latest-model) and make predictions.
+        Alias latest is not allowed -> we use latest-model instead as an alternative.
+
+        :param input_data: Pandas DataFrame containing input features for prediction.
+        :return: Pandas DataFrame with predictions.
+        """
+
+        logger.info("🔮 Loading the latest model from MLflow alias 'production'")
+
+        model_uri = f"models:/{self.model_name}@latest-model"
+
+        model = mlflow.sklearn.load_model(model_uri)
+        logger.info("✅ Model loaded successfully")
+        
+        predictions = model.predict(input_data)
+
+        return predictions
+        
     
