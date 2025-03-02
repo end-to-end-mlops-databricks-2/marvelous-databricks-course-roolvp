@@ -1,6 +1,7 @@
 catalog_name: mlops_dev
 schema_name: raulvenp
 experiment_name_basic: /Shared/alzheimers--basic
+experiment_name_custom: /Shared/alzheimers-custom-model
 
 parameters:
   max_iter: 10000

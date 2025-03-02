@@ -1,8 +1,11 @@
+from typing import List
+
 import mlflow
 import pandas as pd
 
 from mlflow import MlflowClient
 from mlflow.models.signature import infer_signature
+from mlflow.utils.environment import _mlflow_conda_env
 
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
@@ -25,14 +28,29 @@ class AlzheimersPredictionModelWrapper(mlflow.pyfunc.PythonModel):
 
     def predict(self, context, model_input):
         """
-        LESSON: The context needs to be passed, even if not used here. This will be passed by DataBricks when the model is deployed.
+        LESSON: The context needs to be passed, even if not used here. 
+            The context argument will be passed by DataBricks when the model is deployed.
+            If the argument is not present, the wrapper will error. 
+            The 
         """
-        return self.model.predict(model_input)
+        # Get the class predictions (0 or 1)
+        predictions: int = self.model.predict(model_input)
 
+        # Get the probabilities for each class (0 and 1)
+        probabilities = self.model.predict_proba(model_input)
 
+        # Get the probabilities for class 1 (Alzheimer's diagnosis)
+        positive_diagnosis_probability =  probabilities[0][1]
+
+        return {"positive_diagnosis_probability": positive_diagnosis_probability, "prediction": predictions[0]}
+        
 
 class CustomModel:
-    def __init__(self, config: ProjectConfig, tags: Tags, spark: SparkSession):
+    def __init__(self, config: ProjectConfig, tags: Tags, spark: SparkSession, code_paths: List[str]):
+        """
+        Code paths: List of paths to the wheel files of the project
+        """
+
         self.config = config
         self.spark = spark
 
@@ -44,8 +62,11 @@ class CustomModel:
         self.parameters = self.config.parameters
         self.catalog_name = self.config.catalog_name
         self.schema_name = self.config.schema_name
-        self.experiment_name = self.config.experiment_name_basic
-        self.model_name = f"{self.catalog_name}.{self.schema_name}.alzheimers_prediction_basic_model"
+        self.experiment_name = self.config.experiment_name_custom
+        self.model_name = f"{self.catalog_name}.{self.schema_name}.alzheimers_prediction_custom_model"
+        
+        # LESSON: Code paths are needed. Why?
+        self.code_paths = code_paths
 
     def load_data(self) -> None:
         """
@@ -102,6 +123,21 @@ class CustomModel:
         Evaluate the model and log it to MLflow
         """
         mlflow.set_experiment(self.experiment_name)
+        # LESSON: Pyspark is needed for the serving endpoint because it is imported in this package
+        additional_pip_deps = ["pyspark==3.5.0"]
+        # LESSON: code_paths is a list of paths (locations) to the custom wheel files of the custom packages used by the model
+        # LESSON: This way Databricks can install the custom packages when the model is deployed
+        # How do we know the model has been registered correctly? Check it in Unity Catalog
+        # Adding "code/" to the path is necessary because the custom packages are stored in the code directory. _mlflow_conda_env expexts this format
+        for package in self.code_paths:
+            whl_name  = package.split("/")[-1]
+            additional_pip_deps.append(f"code/{whl_name}")
+        
+        logger.info(f"📦 Custom packages to be installed: {additional_pip_deps}")
+        # LESSON: Config to manage the custom packages. DBX uses condas to install the custom packages
+        conda_env = _mlflow_conda_env(additional_pip_deps=additional_pip_deps)
+
+
         with mlflow.start_run(tags=self.tags) as run:
             self.run_id = run.info.run_id
 
@@ -120,13 +156,30 @@ class CustomModel:
             mlflow.log_metrics({"precision": precision, "recall": recall, "f1": f1})
 
             # Log the model
-            signature = infer_signature(model_input=self.X_test, model_output=y_pred)
+            signature = infer_signature(model_input=self.X_test, model_output={"positive_diagnosis_probability": 0.2, "prediction": 0}) 
             dataset = mlflow.data.from_spark(self.train_set_spark,
                                              table_name=f"{self.catalog_name}.{self.schema_name}.train_set",
                                              version=self.data_version)
         
             mlflow.log_input(dataset=dataset, context="training")
-            mlflow.sklearn.log_model(self.pipeline, artifact_path="logisticreg-pipeline-model", signature=signature)
+
+            
+            # LESSON: The model is wrapped in a class that has a predict method
+            # LESSON: the contex argument is still None
+            # LESSON: code_paths is a list of paths (locations) to the custom wheel files of the custom packages used by the model
+
+            # LESSON: This is a pyfunc model. Not a sklearn model. 
+            # LESSON: This uploads the wheel file of the custom package to Unity Catalog
+            # This way the pacakge is available. Doing it as a private package does not work. 
+            # Databricks needs the "code/" folder. That' the only way for serving
+
+            mlflow.pyfunc.log_model(
+                python_model=AlzheimersPredictionModelWrapper(self.pipeline),
+                artifact_path="pyfunc-logisticreg-pipeline-model",
+                code_paths=self.code_paths,
+                conda_env=conda_env,
+                signature=signature
+            )
 
     
     def register_model(self):
@@ -135,7 +188,7 @@ class CustomModel:
         """
         logger.info("📦 Registering the model in the Databricks Unity Catalog")
         registered_model = mlflow.register_model(
-            model_uri=f"runs:/{self.run_id}/logisticreg-pipeline-model", 
+            model_uri=f"runs:/{self.run_id}/pyfunc-logisticreg-pipeline-model", 
             name=self.model_name,
             tags=self.tags
             )
@@ -178,13 +231,15 @@ class CustomModel:
         :return: Pandas DataFrame with predictions.
         """
 
-        logger.info("🔮 Loading the latest model from MLflow alias 'production'")
+        logger.info("🔮 Loading the latest model from MLflow alias 'latest-model' ")
 
         model_uri = f"models:/{self.model_name}@latest-model"
 
-        model = mlflow.sklearn.load_model(model_uri)
+        model: AlzheimersPredictionModelWrapper = mlflow.pyfunc.load_model(model_uri)
         logger.info("✅ Model loaded successfully")
         
+        # LESSON: The model is wrapped in a class that has a predict method
+        # LESSON: the contex argument is None
         predictions = model.predict(input_data)
 
         return predictions
