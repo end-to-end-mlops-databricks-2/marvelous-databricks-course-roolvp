@@ -1,0 +1,37 @@
+catalog_name: mlops_dev
+schema_name: raulvenp
+
+parameters:
+  learning_rate: 0.01
+  n_estimators: 1000
+  max_depth: 6
+
+num_features:
+  - age
+  - education_level
+  - bmi
+  - cognitive_test_score
+
+cat_features:
+  - country
+  - gender
+  - physical_activity_level
+  - smoking_status
+  - alcohol_consumption
+  - diabetes
+  - hypertension
+  - cholesterol_level
+  - family_history_of_alzheimers
+  - depression_level
+  - sleep_quality
+  - dietary_habits
+  - air_pollution_exposure
+  - employment_status
+  - marital_status
+  - genetic_risk_factor__apoe__4_allele_
+  - social_engagement_level
+  - income_level
+  - stress_levels
+  - urban_vs_rural_living
+
+target: alzheimers_diagnosis
