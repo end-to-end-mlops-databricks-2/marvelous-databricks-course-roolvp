@@ -12,7 +12,7 @@ mlflow.set_registry_uri("databricks-uc")
 
 config = ProjectConfig.from_yaml(config_path="../project_config.yml")
 spark = SparkSession.builder.getOrCreate()
-tags = Tags(**{"git_sha":"ccdd47f458bf3c29586e7614260d14e764efd35d", "branch":"week2-MLFlow-Feature-Eng"})
+tags = Tags(**{"git_sha": "ccdd47f458bf3c29586e7614260d14e764efd35d", "branch": "week2-MLFlow-Feature-Eng"})
 
 # config = ProjectConfig.from_yaml(config_path="Volumes/mlops_dev/raulvenp/data/project_config.yml")
 
@@ -49,11 +49,11 @@ fe_model.register_model()
 
 
 # COMMAND ----------
-# Getting the latest version of the model from the registry and predict 
+# Getting the latest version of the model from the registry and predict
 spark = SparkSession.builder.getOrCreate()
 
 test_set = spark.table(f"{config.catalog_name}.{config.schema_name}.test_set").limit(100)
-                       
+
 # artificially drop the columns to simulate the real scenario
 
 X_test = test_set.frop("smoking_status", "alcohol_consumption", "diabetes", config.target)

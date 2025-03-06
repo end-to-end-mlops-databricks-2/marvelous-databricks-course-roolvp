@@ -6,8 +6,6 @@ from pyspark.sql import SparkSession
 from alzheimers_prediction.config import ProjectConfig
 from alzheimers_prediction.data_processor import DataProcessor
 
-
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -18,7 +16,6 @@ logger.info("Configuration loaded:")
 logger.info(yaml.dump(config, default_flow_style=False))
 
 logging.basicConfig(level=logging.INFO)
-
 
 
 # Load the data
@@ -43,7 +40,6 @@ logger.info("Train set shape %s", train_set.shape)
 logger.info("Test set shape %s", test_set.shape)
 
 
-
 # Save to catalog
 logger.info("Saving data to catalog")
 data_processor.save_to_catalog(train_set=train_set, test_set=test_set)
@@ -53,5 +49,3 @@ logger.info("Data saved to catalog")
 # Enable change data feed (only once!)
 logger.info("Enable change data feed")
 data_processor.enable_change_data_feed()
-
-
