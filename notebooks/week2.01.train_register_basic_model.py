@@ -15,7 +15,7 @@ mlflow.login()
 config = ProjectConfig.from_yaml(config_path="../project_config.yml")
 spark = SparkSession.builder.getOrCreate()
 
-tags = Tags(**{"git_sha":"ccdd47f458bf3c29586e7614260d14e764efd35d", "branch":"week2-MLFlow-Feature-Eng"})
+tags = Tags(**{"git_sha": "ccdd47f458bf3c29586e7614260d14e764efd35d", "branch": "week2-MLFlow-Feature-Eng"})
 
 # COMMAND ----------
 
@@ -57,5 +57,5 @@ predictions_df = basic_model.load_latest_model_and_predict(X_test)
 
 
 # COMMAND ----------
-predictions_df
+print(predictions_df)
 # COMMAND ----------

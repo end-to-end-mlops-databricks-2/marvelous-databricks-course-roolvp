@@ -1,25 +1,18 @@
-from typing import List
-
 import mlflow
-import pandas as pd
-
+from databricks import feature_engineering
+from databricks.feature_engineering import FeatureFunction, FeatureLookup
+from databricks.sdk import WorkspaceClient  # Why is this here?
+from loguru import logger
 from mlflow import MlflowClient
 from mlflow.models.signature import infer_signature
-from mlflow.utils.environment import _mlflow_conda_env
-
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import recall_score
-from sklearn.metrics import precision_score
-from sklearn.metrics import f1_score
-
 from pyspark.sql import SparkSession
+from sklearn.compose import ColumnTransformer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
 
 from alzheimers_prediction.config import ProjectConfig, Tags
-from loguru import logger
 
 
 class AlzheimersPredictionModelWrapper(mlflow.pyfunc.PythonModel):
@@ -28,10 +21,10 @@ class AlzheimersPredictionModelWrapper(mlflow.pyfunc.PythonModel):
 
     def predict(self, context, model_input):
         """
-        LESSON: The context needs to be passed, even if not used here. 
+        LESSON: The context needs to be passed, even if not used here.
             The context argument will be passed by DataBricks when the model is deployed.
-            If the argument is not present, the wrapper will error. 
-            The 
+            If the argument is not present, the wrapper will error.
+            The
         """
         # Get the class predictions (0 or 1)
         predictions: int = self.model.predict(model_input)
@@ -40,66 +33,167 @@ class AlzheimersPredictionModelWrapper(mlflow.pyfunc.PythonModel):
         probabilities = self.model.predict_proba(model_input)
 
         # Get the probabilities for class 1 (Alzheimer's diagnosis)
-        positive_diagnosis_probability =  probabilities[0][1]
+        positive_diagnosis_probability = probabilities[0][1]
 
         return {"positive_diagnosis_probability": positive_diagnosis_probability, "prediction": predictions[0]}
-        
 
-class CustomModel:
-    def __init__(self, config: ProjectConfig, tags: Tags, spark: SparkSession, code_paths: List[str]):
+
+class FeatureLookupModel:
+    def __init__(self, config: ProjectConfig, tags: Tags, spark: SparkSession):  # No code_paths here
         """
-        Code paths: List of paths to the wheel files of the project
+        Initialize the FeatureLookupModel class
         """
 
         self.config = config
         self.spark = spark
+        self.workspace = WorkspaceClient()
+        self.fe = feature_engineering.FeatureEngineeringClient(model_registry_uri="databricks-uc")
 
         # Extract model parameters from the config
-        self.tags = tags.model_dump()
         self.num_features = self.config.num_features
         self.cat_features = self.config.cat_features
         self.target = self.config.target
         self.parameters = self.config.parameters
         self.catalog_name = self.config.catalog_name
         self.schema_name = self.config.schema_name
+        self.model_name = f"{self.catalog_name}.{self.schema_name}.alzheimers_prediction_feature_model"
+
+        # self.model_name = f"{self.catalog_name}.{self.schema_name}.alzheimers_prediction_feature_model"
+
+        # LESSON: Feature Lookup Table
+        self.feature_table_name = f"{self.catalog_name}.{self.schema_name}.alzheimers_features"
+
+        # LESSON: Feature Custom Function
+        self.function_name = f"{self.catalog_name}.{self.schema_name}.calculate_healthy_lifestyle_score"
+
+        # MLflow config
+        self.tags = tags.model_dump()
         self.experiment_name = self.config.experiment_name_custom
-        self.model_name = f"{self.catalog_name}.{self.schema_name}.alzheimers_prediction_custom_model"
-        
-        # LESSON: Code paths are needed. Why?
-        self.code_paths = code_paths
 
-    def load_data(self) -> None:
+    def create_feature_table(self):
+        # [Q] What are recommendations and good practices for managing Databricks tables in code? Adding new columns and altering the schema
         """
-        Load date from the train set and test set in the catalog.
-
-        Split the data into features and target
+        This is to simulate the scenario of online feature lookup
         """
-        # Load data from the catalog
-        self.train_set_spark = self.spark.table(f"{self.catalog_name}.{self.schema_name}.train_set")
-        self.train_set_pandas = self.train_set_spark.toPandas()
-        
-        self.test_set_spark = self.spark.table(f"{self.catalog_name}.{self.schema_name}.test_set")
-        self.test_set_pandas = self.test_set_spark.toPandas()
-        self.data_version = "0" 
+        # with emoji of mechanic log
+        logger.info(f"🔧 Creating the feature lookup table {self.feature_table_name}")
+        self.spark.sql(f"""
+            CREATE OR REPLACE TABLE {self.feature_table_name} (
+                Id STRING NOT NULL,
+                smoking_status  STRING,
+                alcohol_consumption STRING,
+                diabetes    STRING
+                );
+        """)
+        logger.info("✅ Feature lookup table created successfully")
 
-        self.X_train = self.train_set_pandas[self.num_features + self.cat_features]
-        self.y_train = self.train_set_pandas[self.target]
+        # LESSON: PK is needed in feature lookup tables. It is also important to have it as string.
+        self.spark.sql(f"ALTER TABLE {self.feature_table_name} ADD CONSTRAINT patient_pk PRIMARY KEY(Id);")
+        # LESSON: Enable change data feed allow for keeping track of data versioning. We'll be using it for copy the change in the tables.
+        # LESSON: We'll be only recording the change in the table. For example, for tracking change of statuses
+        self.spark.sql(f"ALTER TABLE {self.feature_table_name} SET TBLPROPERTIES (delta.enableChangeDataFeed = true);")
 
-        self.X_test = self.test_set_pandas[self.num_features + self.cat_features]
-        self.y_test = self.test_set_pandas[self.target]
+        self.spark.sql(
+            f"INSERT INTO {self.feature_table_name} Select Id, smoking_status, alcohol_consumption, diabetes from {self.catalog_name}.{self.schema_name}.train_set"
+        )
+        self.spark.sql(
+            f"INSERT INTO {self.feature_table_name} Select Id, smoking_status, alcohol_consumption, diabetes from {self.catalog_name}.{self.schema_name}.test_set"
+        )
+        logger.info("✅ Data inserted into the feature lookup table")
+
+    def define_feature_function(self):
+        """
+        Feature functions: healthy_lifestyle_score
+        """
+        logger.info(f"🔧 Defining the feature function {self.function_name}")
+        self.spark.sql(f"""
+            CREATE OR REPLACE FUNCTION {self.function_name} (physical_activity_level STRING)
+            RETURNS INT
+            LANGUAGE PYTHON AS
+            $$
+            if physical_activity_level == 'Low':
+                return 0
+            elif physical_activity_level == 'Medium':
+                return 5
+            elif physical_activity_level == 'High':
+                return 10
+            else:
+                return 5
+            $$;
+                """)
+        logger.info("✅ Feature function defined successfully")
+
+    def _recreate_feature_function(self, physical_activity_level: str):
+        """
+        Recreate the feature function in pure Python. This is to build the training and test sets. Just for the sake of the example
+        """
+        if physical_activity_level == "Low":
+            return 0
+        elif physical_activity_level == "Medium":
+            return 5
+        elif physical_activity_level == "High":
+            return 10
+        else:
+            return 5
+
+    def load_data(self):
+        # Dropping columns to simulate that they need to be looked when online
+        self.train_set = self.spark.table(f"{self.catalog_name}.{self.schema_name}.train_set").drop(
+            "smoking_status", "alcohol_consumption", "diabetes"
+        )
+
+        # This is Pandas, the previous one was Spark
+        self.test_set = self.spark.table(f"{self.catalog_name}.{self.schema_name}.test_set").toPandas()
+
+        self.train_set = self.train_set.withColumn("Id", self.train_set["Id"].cast("string"))
+
         logger.info("🏗️ Data loaded successfully")
 
-    def prepare_features(self) -> None:
+    def feature_engineering(self):
         """
-        Encode categorical features and ignores unseen categories
-
-        preprocessor = ColumnTransformer(
-        transformers=[("cat", OneHotEncoder(handle_unknown="ignore"), cat_features)], remainder="passthrough"
-)
-
-        transformed_df_train = pd.DataFrame(preprocessor.fit_transform(X_train), columns=preprocessor.get_feature_names_out())
-        transformed_df_test = pd.DataFrame(preprocessor.transform(X_test), columns=preprocessor.get_feature_names_out())
+        Combine table data + feature lookup + feature function
         """
+        # LESSON: Using the FE client
+
+        self.training_set = self.fe.create_training_set(
+            df=self.train_set,  # Represents the features the user is going to provide
+            label=self.target,
+            feature_lookups=[
+                FeatureLookup(
+                    table_name=self.feature_table_name,
+                    feature_names=["smoking_status", "alcohol_consumption", "diabetes"],
+                    lookup_key="Id",
+                ),
+                FeatureFunction(
+                    udf_name=self.function_name,
+                    input_bindings={"physical_activity_level": "physical_activity_level"},
+                    output_name="healthy_lifestyle_score",
+                ),
+            ],
+            exclude_columns=["update_timestamp_utc"],
+        )
+
+        self.training_df = self.training_set.load_df().toPandas()
+        self.test_set["healthy_lifestyle_score"] = self.test_set["physical_activity_level"].apply(
+            self._recreate_feature_function
+        )
+
+        self.X_train = self.training_df[self.num_features + self.cat_features + ["healthy_lifestyle_score"]]
+        self.y_train = self.training_df[self.target]
+
+        self.X_test = self.test_set[self.num_features + self.cat_features + ["healthy_lifestyle_score"]]
+        self.y_test = self.test_set[self.target]
+
+        logger.info("🔧 Feature engineering completed successfully")
+
+    def train(self):
+        """
+        Define pipeline
+        Set experiment
+        Do a Run
+        LESSON: Log the model to the run. It is not the same model registry
+        """
+
         logger.info("⌛ Defining feature pre-processing pipeline")
         self.preprocessor = ColumnTransformer(
             transformers=[("cat", OneHotEncoder(handle_unknown="ignore"), self.cat_features)], remainder="passthrough"
@@ -110,38 +204,12 @@ class CustomModel:
         )
         logger.info("✅ Feature pre-processing pipeline defined successfully")
 
-    def train(self) -> None:
-        """
-        Train the model
-        """
-        logger.info("🏋️ Training the model")
-        self.pipeline.fit(self.X_train, self.y_train)
-        logger.info("✅ Model trained successfully")
-
-    def log_model(self):
-        """
-        Evaluate the model and log it to MLflow
-        """
         mlflow.set_experiment(self.experiment_name)
-        # LESSON: Pyspark is needed for the serving endpoint because it is imported in this package
-        additional_pip_deps = ["pyspark==3.5.0"]
-        # LESSON: code_paths is a list of paths (locations) to the custom wheel files of the custom packages used by the model
-        # LESSON: This way Databricks can install the custom packages when the model is deployed
-        # How do we know the model has been registered correctly? Check it in Unity Catalog
-        # Adding "code/" to the path is necessary because the custom packages are stored in the code directory. _mlflow_conda_env expexts this format
-        for package in self.code_paths:
-            whl_name  = package.split("/")[-1]
-            additional_pip_deps.append(f"code/{whl_name}")
-        
-        logger.info(f"📦 Custom packages to be installed: {additional_pip_deps}")
-        # LESSON: Config to manage the custom packages. DBX uses condas to install the custom packages
-        conda_env = _mlflow_conda_env(additional_pip_deps=additional_pip_deps)
-
-
         with mlflow.start_run(tags=self.tags) as run:
             self.run_id = run.info.run_id
-
+            self.pipeline.fit(self.X_train, self.y_train)
             y_pred = self.pipeline.predict(self.X_test)
+
             precision = precision_score(self.y_test, y_pred)
             recall = recall_score(self.y_test, y_pred)
             f1 = f1_score(self.y_test, y_pred)
@@ -151,97 +219,44 @@ class CustomModel:
             logger.info(f"Recall: {recall}")
             logger.info(f"F1: {f1}")
 
-            mlflow.log_param("model_type", "LogisticRegression with OneHotEncoding")
-            mlflow.log_params(self.parameters)
-            mlflow.log_metrics({"precision": precision, "recall": recall, "f1": f1})
+            mlflow.log_params("model_type", "LogisticRegression with OneHotEncoding and Healthy Lifestyle Score")
+            mlflow.log_metric("precision", precision)
+            mlflow.log_metric("recall", recall)
+            mlflow.log_metric("f1", f1)
 
-            # Log the model
-            signature = infer_signature(model_input=self.X_test, model_output={"positive_diagnosis_probability": 0.2, "prediction": 0}) 
-            dataset = mlflow.data.from_spark(self.train_set_spark,
-                                             table_name=f"{self.catalog_name}.{self.schema_name}.train_set",
-                                             version=self.data_version)
-        
-            mlflow.log_input(dataset=dataset, context="training")
+            signature = infer_signature(self.X_train, y_pred)
 
-            
-            # LESSON: The model is wrapped in a class that has a predict method
-            # LESSON: the contex argument is still None
-            # LESSON: code_paths is a list of paths (locations) to the custom wheel files of the custom packages used by the model
-
-            # LESSON: This is a pyfunc model. Not a sklearn model. 
-            # LESSON: This uploads the wheel file of the custom package to Unity Catalog
-            # This way the pacakge is available. Doing it as a private package does not work. 
-            # Databricks needs the "code/" folder. That' the only way for serving
-
-            mlflow.pyfunc.log_model(
-                python_model=AlzheimersPredictionModelWrapper(self.pipeline),
-                artifact_path="pyfunc-logisticreg-pipeline-model",
-                code_paths=self.code_paths,
-                conda_env=conda_env,
-                signature=signature
+            # LESSON: Log FE model
+            self.fe.log_model(
+                model=self.pipeline,
+                flavor=mlflow.sklearn,
+                artifact_path="logistic-regression-model-fe",
+                training_set=self.training_set,
+                signature=signature,
             )
 
-    
     def register_model(self):
         """
-        Register the model in Databricks Unity Catalog
+        Register the model with versionning and tags for dynamic selection
         """
-        logger.info("📦 Registering the model in the Databricks Unity Catalog")
         registered_model = mlflow.register_model(
-            model_uri=f"runs:/{self.run_id}/pyfunc-logisticreg-pipeline-model", 
-            name=self.model_name,
-            tags=self.tags
-            )
-        
+            model_uri="runs:/{self.run_id}/logistic-regression-model-fe", name=self.model_name, tags=self.tags
+        )
+
         latest_version = registered_model.version
 
         client = MlflowClient()
         client.set_registered_model_alias(
             name=self.model_name,
-            alias="latest-model",
-            version=latest_version
+            alias_name="latest-model",
+            version=latest_version,
         )
-        
 
-    def retrieve_current_run_dataset(self):
+    def load_latest_model_and_predict(self, X):
         """
-        Retrieve the dataset used in the current run
+        Load the latest model and predict
         """
-        run = mlflow.get_run(self.run_id)
-        dataset_info = run.inputs.dataset_inputs[0].dataset
-        dataset_source = mlflow.data.get_source(dataset_info)
-        # What  is a dataset? Is it a reference or the actual data?
-        logger.info("📊 Dataset source loaded")
-        return dataset_source.load()
-    
-    def retrieve_current_run_metadata(self):
-
-        run = mlflow.get_run(self.run_id)
-        metrics = run.data.to_dictionary()["metrics"]
-        params = run.data.to_dictionary()["params"]
-        logger.info("📊 Dataset metadata loaded")
-        return metrics, params
-    
-    def load_latest_model_and_predict(self, input_data: pd.DataFrame):
-        """
-        Load the latest model from MLflow (alias=latest-model) and make predictions.
-        Alias latest is not allowed -> we use latest-model instead as an alternative.
-
-        :param input_data: Pandas DataFrame containing input features for prediction.
-        :return: Pandas DataFrame with predictions.
-        """
-
-        logger.info("🔮 Loading the latest model from MLflow alias 'latest-model' ")
-
         model_uri = f"models:/{self.model_name}@latest-model"
 
-        model: AlzheimersPredictionModelWrapper = mlflow.pyfunc.load_model(model_uri)
-        logger.info("✅ Model loaded successfully")
-        
-        # LESSON: The model is wrapped in a class that has a predict method
-        # LESSON: the contex argument is None
-        predictions = model.predict(input_data)
-
+        predictions = self.fe.score_batch(model_uri=model_uri, df=X)
         return predictions
-        
-    
