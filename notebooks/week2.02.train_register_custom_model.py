@@ -31,13 +31,13 @@ mlflow.set_registry_uri("databricks-uc")
 
 config = ProjectConfig.from_yaml(config_path="../project_config.yml")
 spark = SparkSession.builder.getOrCreate()
-tags = Tags(**{"git_sha": "ccdd47f458bf3c29586e7614260d14e764efd35d", "branch": "week2-MLFlow-Feature-Eng"})
+tags = Tags(**{"git_sha": "5234b3d9965fee0388536bec25aa39a68bf1e162", "branch": "week3-model-serving"})
 
 # COMMAND ----------
 
 # [Q] What is code_paths? The location of the wheel files of the custom packages that are needed to run the model.
 custom_model = CustomModel(
-    config=config, tags=tags, spark=spark, code_paths=["../dist/alzheimers_prediction-0.0.3-py3-none-any.whl"]
+    config=config, tags=tags, spark=spark, code_paths=["../dist/alzheimers_prediction-0.0.4-py3-none-any.whl"]
 )
 
 # COMMAND ----------
@@ -50,7 +50,7 @@ custom_model.log_model()
 
 # COMMAND ----------
 run_id = mlflow.search_runs(
-    experiment_names=[config.experiment_name_custom], filter_string="tags.branch = 'week2-MLFlow-Feature-Eng'"
+    experiment_names=[config.experiment_name_custom], filter_string="tags.branch = 'week3-model-serving'"
 ).run_id[0]
 
 # COMMAND ----------
