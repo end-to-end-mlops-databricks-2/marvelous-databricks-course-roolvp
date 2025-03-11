@@ -1,5 +1,13 @@
-catalog_name: mlops_dev
-schema_name: raulvenp
+prd:
+  catalog_name: mlops_prod
+  schema_name: raulvenp
+acc:
+  catalog_name: mlops_acc
+  schema_name: raulevenp
+dev:
+  catalog_name: mlops_prod
+  schema_name: raulvenp
+
 experiment_name_basic: /Shared/alzheimers--basic
 experiment_name_custom: /Shared/alzheimers-custom-model
 experiment_name_fe: /Shared/alzheimers-feature-engineering-model

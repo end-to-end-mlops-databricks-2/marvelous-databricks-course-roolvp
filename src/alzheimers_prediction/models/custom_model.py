@@ -190,6 +190,7 @@ class CustomModel:
 
         client = MlflowClient()
         client.set_registered_model_alias(name=self.model_name, alias="latest-model", version=latest_version)
+        return latest_version
 
     def retrieve_current_run_dataset(self):
         """

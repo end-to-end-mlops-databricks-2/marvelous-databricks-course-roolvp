@@ -75,4 +75,5 @@ class ModelServing:
                 name=self.endpoint_name,
                 served_entities=served_entities
                 )
+        # TODO: Add a check to see if the endpoint is ready to receive requests
             
