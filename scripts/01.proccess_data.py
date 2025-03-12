@@ -15,24 +15,27 @@ parser = ArgumentParser()
 parser.add_argument(
     "--root_path",
     action="store",
-    default=None,
+    default="..",
     type=str,
-    required=True, 
+    required=False, 
 )
 
 parser.add_argument(
     "--env",
     action="store",
-    default=None,
+    default="dev",
     type=str,
-    required=True,
+    required=False,
 )
 
 args = parser.parse_args()
 root_path = args.root_path
 config_path = f"{root_path}/project_config.yml"
 
-config = ProjectConfig.from_yaml(config_path=config_path, env=args.env) 
+env = args.env
+
+logger.info("Loading configuration from %s", config_path)
+config = ProjectConfig.from_yaml(config_path=config_path, env=env)
 
 logger.info("Configuration loaded:")
 logger.info(yaml.dump(config, default_flow_style=False))

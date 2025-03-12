@@ -5,7 +5,7 @@ acc:
   catalog_name: mlops_acc
   schema_name: raulevenp
 dev:
-  catalog_name: mlops_prod
+  catalog_name: mlops_dev
   schema_name: raulvenp
 
 experiment_name_basic: /Shared/alzheimers--basic
